@@ -3,7 +3,7 @@ name: Generate BIOS Report
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * *'  # Jadwalkan untuk dijalankan setiap hari pada tengah malam
+    - cron: '0 0 * * *'
 
 jobs:
   generate-report:
@@ -20,7 +20,6 @@ jobs:
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install requests
 
     - name: Authenticate and fetch data
@@ -28,24 +27,23 @@ jobs:
         SATKER: 677571
         KEY: FrQMYUQIlqVciSubILZU4r2ijOWH1Eer
       run: |
-        import requests
+        python << EOF
         import os
+        import requests
+        from html import escape
 
-        # URL dan parameter untuk login
+        # Autentikasi
         login_url = "https://training-bios2.kemenkeu.go.id/api/token"
-        payload = {
-            "satker": os.getenv("SATKER"),
-            "key": os.getenv("KEY")
-        }
-
-        # Melakukan POST request untuk mendapatkan token
-        response = requests.post(login_url, data=payload)
-        token = response.json().get("token")
+        response = requests.post(
+            login_url,
+            data={"satker": os.environ['SATKER'], "key": os.environ['KEY']}
+        )
+        token = response.json().get('token')
 
         if not token:
             raise Exception("Gagal mendapatkan token")
 
-        # Endpoints untuk mengambil data
+        # Daftar endpoint
         endpoints = [
             "https://training-bios2.kemenkeu.go.id/api/get/data/keuangan/akuntansi/penerimaan",
             "https://training-bios2.kemenkeu.go.id/api/get/data/keuangan/akuntansi/pengeluaran",
@@ -56,27 +54,48 @@ jobs:
             "https://training-bios2.kemenkeu.go.id/api/get/data/pendidikan/sdm/jumlah_tenaga_kependidikan"
         ]
 
-        # Mengambil data dari setiap endpoint
-        data = {}
-        for endpoint in endpoints:
-            response = requests.get(endpoint, headers={"Authorization": f"Bearer {token}"})
-            data[endpoint] = response.json()
+        # Membuat HTML
+        html_content = '''
+        <html>
+            <head>
+                <title>Laporan BIOS</title>
+                <style>
+                    table {border-collapse: collapse; width: 100%; margin: 20px 0;}
+                    th, td {border: 1px solid #ddd; padding: 8px; text-align: left;}
+                    th {background-color: #f2f2f2;}
+                    tr:nth-child(even) {background-color: #f9f9f9;}
+                </style>
+            </head>
+            <body>
+                <h1>Laporan BIOS</h1>
+        '''
 
-        # Membuat file HTML
-        html_content = "<html><body><h1>Laporan BIOS</h1><table border='1'>"
-        for endpoint, result in data.items():
-            html_content += f"<tr><th colspan='2'>{endpoint}</th></tr>"
-            for key, value in result.items():
-                html_content += f"<tr><td>{key}</td><td>{value}</td></tr>"
-        html_content += "</table></body></html>"
+        # Ambil data dari setiap endpoint
+        for url in endpoints:
+            response = requests.get(url, headers={"Authorization": f"Bearer {token}"})
+            data = response.json()
+            
+            html_content += f'<h2>{url.split("/")[-1].replace("_", " ").title()}</h2>'
+            html_content += '<table>'
+            for key, value in data.items():
+                html_content += f'''
+                <tr>
+                    <td><strong>{escape(str(key))}</strong></td>
+                    <td>{escape(str(value))}</td>
+                </tr>
+                '''
+            html_content += '</table>'
 
-        with open("laporan.html", "w") as file:
-            file.write(html_content)
+        html_content += '</body></html>'
+
+        with open('laporan.html', 'w') as f:
+            f.write(html_content)
+        EOF
 
     - name: Commit and push changes
       run: |
         git config --global user.name "GitHub Actions"
         git config --global user.email "actions@github.com"
         git add laporan.html
-        git commit -m "Update laporan.html"
+        git commit -m "Update laporan $(date +'%Y-%m-%d %H:%M:%S')"
         git push
